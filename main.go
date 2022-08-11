@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net/http"
+	"os"
 
 	"log"
 
@@ -24,9 +25,9 @@ func main() {
 		}, promhttp.HandlerOpts{})
 		h.ServeHTTP(w, r)
 	})
-	log.Println("Starting http server - %s", "0.0.0.0:9560")
+	log.Printf("INFO: Starting http server - %s", "0.0.0.0:9560")
 	if err := http.ListenAndServe("0.0.0.0:9560", nil); err != nil {
-		log.Printf("Failed to start http server: %s", err)
+		log.Printf("ERROR: Failed to start http server: %s", err)
 	}
 }
 
@@ -41,13 +42,20 @@ type Config struct {
 
 var Result float64
 
+func gethostname() string {
+	host, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("ERROR: Hostname fetching err", err)
+	}
+	return host
+}
 func configConstructer() Config {
 	return Config{
 		URI:    "mysqld_exporter:StrongPassword@tcp(127.0.0.1:3306)/mysql",
 		Query:  "SELECT sum(data_length + index_length)/1024/1024 as document_count FROM information_schema.TABLES;",
 		Type:   "Gauge",
 		Value:  "document_count",
-		Labels: []string{"mariadb"},
+		Labels: []string{"instance"},
 	}
 }
 
@@ -60,7 +68,7 @@ func (e *QueryCollector) Describe(ch chan<- *prometheus.Desc) {
 		"Exporter for Mariadb Storage Usage in MB",
 		cfg.Labels, nil,
 	)
-	log.Println("metric description for \"%s\" registerd", "mariadb_exporter")
+	log.Printf("INFO: metric description for \"%s\" registerd", "mariadb_exporter")
 }
 
 // Collect -> prometheus collect
@@ -68,22 +76,21 @@ func (e *QueryCollector) Collect(ch chan<- prometheus.Metric) {
 	db, err := sql.Open("mysql", cfg.URI)
 
 	if err != nil {
-		log.Printf("Connect to database failed: %s", err)
+		log.Printf("ERROR: Connect to database failed: %s", err)
 		return
 	}
 	defer db.Close()
 
 	rows := db.QueryRow(cfg.Query).Scan(&Result)
 	if rows != nil {
-		log.Printf("Querying failed", err)
+		log.Printf("ERROR: Querying failed", err)
 	}
 
 	// Metric labels - Not doing anything here but might be useful
-	data := make(map[string]string)
 	labelVals := []string{}
-	for _, label := range cfg.Labels {
-		labelVals = append(labelVals, data[label])
+	for range cfg.Labels {
+		labelVals = append(labelVals, gethostname())
 	}
-	// Add metric
-	ch <- prometheus.MustNewConstMetric(cfg.metricDesc, prometheus.GaugeValue, Result, cfg.Labels...)
+	// Run Collector channel
+	ch <- prometheus.MustNewConstMetric(cfg.metricDesc, prometheus.GaugeValue, Result, labelVals...)
 }
